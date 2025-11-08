@@ -13,3 +13,9 @@ htmlcov
 output
 .DS_Store
 .vscode
+
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb

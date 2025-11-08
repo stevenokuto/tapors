@@ -1,130 +1,269 @@
-# PyTapo
+# Tapors - Pure Rust Tapo Camera Library
 
-Python library for communication with Tapo Cameras.
+A clean, efficient pure Rust implementation for communicating with TP-Link Tapo cameras.
 
-Used inside Home Assistant Integration [HomeAssistant-Tapo-Control](https://github.com/JurajNyiri/HomeAssistant-Tapo-Control).
+**This is a complete rewrite from Python to Rust**, focusing on core functionality: device information and child device management.
 
-## Pre-Requirements
+## Features
 
-- Python3.13
-- PIP modules installed
+- **Pure Rust** - No Python dependencies, fully native Rust implementation
+- **Clean API** - Simple, intuitive interface with only the essentials
+- **Secure Communication** - AES-128-CBC encryption for all requests
+- **Flexible Authentication** - Automatic detection of SHA256/MD5 hash methods
+- **Type-Safe** - Strong typing with Rust's type system
+- **Error Handling** - Comprehensive error types using `thiserror`
 
-## Install:
+## Installation
 
+Add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+tapors = { path = "." }
 ```
-python3 -m pip install pytapo
+
+Or if published to crates.io:
+
+```toml
+[dependencies]
+tapors = "0.1"
 ```
 
-## Usage examples:
+## Quick Start
 
-### Initiate library:
+```rust
+use tapors::{Tapo, Result};
 
+fn main() -> Result<()> {
+    // Connect to your Tapo camera
+    let mut tapo = Tapo::new("192.168.1.100", "admin", "your-password")?;
+
+    // Get basic device information
+    let info = tapo.get_basic_info()?;
+    println!("Device: {} ({})", info.device_model, info.device_type);
+    println!("Firmware: {}", info.fw_ver);
+    println!("MAC: {}", info.mac);
+
+    // Get child devices (for hubs/gateways)
+    let children = tapo.get_child_devices()?;
+    for child in children {
+        println!("Child: {} - {}", child.device_name, child.device_id);
+    }
+
+    Ok(())
+}
 ```
-from pytapo import Tapo
 
-user = "" # user you set in Advanced Settings -> Camera Account
-password = "" # password you set in Advanced Settings -> Camera Account
-host = "" # ip of the camera, example: 192.168.1.52
+## Core API
 
-tapo = Tapo(host, user, password)
+### Creating a Tapo Instance
 
-print(tapo.getBasicInfo())
+```rust
+// Standard connection (port 443)
+let mut tapo = Tapo::new("192.168.1.100", "admin", "password")?;
+
+// Custom port
+let mut tapo = Tapo::new_with_port("192.168.1.100", 8443, "admin", "password")?;
 ```
+
+### Getting Device Information
+
+```rust
+let info = tapo.get_basic_info()?;
+
+// Available fields:
+println!("Device Type:  {}", info.device_type);
+println!("Device Model: {}", info.device_model);
+println!("Device Name:  {}", info.device_name);
+println!("Firmware:     {}", info.fw_ver);
+println!("Hardware:     {}", info.hw_version);
+println!("MAC:          {}", info.mac);
+```
+
+### Getting Child Devices
+
+```rust
+let children = tapo.get_child_devices()?;
+
+for child in children {
+    println!("ID:    {}", child.device_id);
+    println!("Name:  {}", child.device_name);
+    println!("Type:  {}", child.device_type);
+    println!("Model: {}", child.device_model);
+}
+```
+
+### Advanced: Custom Method Execution
+
+```rust
+use serde_json::json;
+
+// Execute any custom method
+let params = json!({
+    "some_param": "value"
+});
+
+let response = tapo.execute_method("customMethod", Some(params))?;
+```
+
+## Examples
+
+Run the basic example:
+
+```bash
+cargo run --example basic_usage
+```
+
+Make sure to edit `examples/basic_usage.rs` with your camera's IP address and credentials first.
 
 ## Authentication
 
-Depending on your camera model and firmware version, the authentication method varies.
+The library supports traditional HTTPS authentication with automatic detection of the hash method:
 
-Normally you should be able to authenticate using the "camera account" created via the Tapo App (Settings > Advanced settings > Camera account).
+- **SHA256** - Used by newer firmware versions
+- **MD5** - Used by older firmware versions
 
-In case of a similar stack trace:
+The correct method is automatically detected during authentication.
+
+### Camera Account Setup
+
+You need to create a camera account via the Tapo app:
+1. Open Tapo app
+2. Go to camera Settings
+3. Navigate to Advanced Settings
+4. Create a Camera Account
+5. Use those credentials with this library
+
+**Note:** KLAP protocol detection is included but not fully implemented. Most Tapo devices work fine with traditional HTTPS authentication.
+
+## Architecture
+
+The library is organized into clean, focused modules:
 
 ```
-Traceback (most recent call last):
-  File "/home/user/Projects/pytapo/pytapo/__init__.py", line 41, in __init__
-    self.basicInfo = self.getBasicInfo()
-  File "/home/user/Projects/pytapo/pytapo/__init__.py", line 232, in getBasicInfo
-    return self.performRequest(
-  File "/home/user/Projects/pytapo/pytapo/__init__.py", line 95, in performRequest
-    self.ensureAuthenticated()
-  File "/home/user/Projects/pytapo/pytapo/__init__.py", line 61, in ensureAuthenticated
-    return self.refreshStok()
-  File "/home/user/Projects/pytapo/pytapo/__init__.py", line 80, in refreshStok
-    raise Exception("Invalid authentication data")
-Exception: Invalid authentication data
+src/
+├── lib.rs              # Public API and documentation
+├── tapo.rs             # Main Tapo struct and methods
+├── error.rs            # Error types
+├── types.rs            # Data structures (BasicInfo, ChildDevice, etc.)
+├── crypto.rs           # Encryption utilities (AES, hashing)
+└── auth/
+    ├── mod.rs          # Auth module exports
+    ├── traditional.rs  # HTTPS authentication implementation
+    └── klap.rs         # KLAP protocol (placeholder)
 ```
 
-Attempt to authenticate using `admin` as `user` and your TP-Link cloud account password as `password`.
+## Security
 
-## Downloading Recordings
+- All communication with the camera is encrypted using AES-128-CBC
+- TLS/SSL with self-signed certificate support
+- Session tokens (stok) for authenticated requests
+- Password never sent in plain text (hashed with nonce)
 
-Integration supports downloading recordings saved on camera's SD card.
+## Error Handling
 
-See [example script](https://github.com/JurajNyiri/pytapo/blob/main/experiments/DownloadRecordings.py).
-You need to call it with following ENV values:
+The library uses `thiserror` for comprehensive error types:
 
-- `HOST`: IP Address of your camera
-- `PASSWORD_CLOUD`: Tapo cloud account password, it is required to access the recordings, everything is still local
-- `OUTPUT`: Directory where you wish to save all the recordings
-- `DATE`: Date for which to download recordings in format of YYYYMMDD, for example 20230221.
+```rust
+use tapors::{TapoError, Result};
 
-You also need to have ffmpeg installed as that is used for converting the streams to watchable file.
+match tapo.get_basic_info() {
+    Ok(info) => println!("Success: {:?}", info),
+    Err(TapoError::AuthenticationError(msg)) => println!("Auth failed: {}", msg),
+    Err(TapoError::ConnectionError(msg)) => println!("Connection failed: {}", msg),
+    Err(TapoError::DeviceError { code, msg }) => println!("Device error {}: {}", code, msg),
+    Err(e) => println!("Other error: {}", e),
+}
+```
 
-## Contributions:
+## Comparison with Python Version
 
-Contributions to pytapo are welcomed.
+| Feature | Python (pytapo) | Rust (tapors) |
+|---------|-----------------|---------------|
+| Language | Python 3.13 | Rust 2021 |
+| Dependencies | requests, pycryptodome, python-kasa | Pure Rust crates |
+| Basic Info | ✅ | ✅ |
+| Child Devices | ✅ | ✅ |
+| Media Streaming | ✅ | ❌ (out of scope) |
+| Full Camera Control | ✅ (200+ methods) | ⚠️ (via execute_method) |
+| KLAP Support | ✅ Full | ⚠️ Placeholder |
+| Performance | Good | Excellent |
+| Memory Safety | Runtime | Compile-time |
 
-By creating a PR you acknowledge and agree that you are not breaking any TOS, law and/or have a permission to provide and share the code changes.
+## Why Rust?
 
-Owner of this repository is not legally responsible for any PRs or code changes to this project created by 3rd parties.
+This rewrite to Rust provides:
 
-When you make a new change to the code base, make sure to have 100% unit test coverage, see below for more information about tests.
+- **Performance**: Native compiled code is significantly faster
+- **Memory Safety**: No runtime errors from memory issues
+- **Concurrency**: Safe concurrent access without data races
+- **Type Safety**: Catch errors at compile time
+- **Zero-cost Abstractions**: High-level code with low-level performance
+- **No GC Pauses**: Predictable performance
 
-### Test instructions
+## Testing
 
-Set the following environment variables:
+Run the test suite:
 
-`PYTAPO_USER` - user you set in Advanced Settings -> Camera Account
+```bash
+cargo test
+```
 
-`PYTAPO_PASSWORD` - password you set in Advanced Settings -> Camera Account
+Run with output:
 
-`PYTAPO_IP` - ip of the camera, example: 192.168.1.52
+```bash
+cargo test -- --nocapture
+```
 
-Install `pre-commit` and `tox` from pip.
+## Building
 
-Run `pre-commit install` and `pre-commit install -t pre-push`.
+```bash
+# Debug build
+cargo build
 
-Then run `tox` to run all the tests.
+# Release build (optimized)
+cargo build --release
 
-Linters are ran on every commit.
+# Run examples
+cargo run --example basic_usage
+```
 
-Tests are ran on push.
+## Contributing
 
-Your camera may do all the actions supported by this library, including, but not limited to, move, change privacy mode and reboot while tests are running. Camera does not format SD card during tests.
+This is a focused implementation providing only the core functionality needed for most users:
+- Device information (`get_basic_info`)
+- Child device management (`get_child_devices`)
 
-After the tests are done, your camera should be in the initial state.
+If you need additional functionality, you can use the `execute_method()` function to send custom commands.
 
-## Thank you
+## License
 
-- [Dale Pavey](https://research.nccgroup.com/2020/07/31/lights-camera-hacked-an-insight-into-the-world-of-popular-ip-cameras/) from NCC Group for the initial research on the Tapo C200
-- [likaci](https://github.com/likaci) and [his github repository](https://github.com/likaci/mercury-ipc-control) for the research on the Mercury camera on which tapo is based
-- [Tim Zhang](https://github.com/ttimasdf) for additional research for Mercury camera on [his github repository](https://github.com/ttimasdf/mercury-ipc-control)
-- [Gábor Szabados](https://github.com/GSzabados) for doing research and gathering all the information above in [Home Assistant Community forum](https://community.home-assistant.io/t/use-pan-tilt-function-for-tp-link-tapo-c200-from-home-assistant/170143/18)
-- [Davide Depau](https://github.com/Depau) for additional [research](https://md.depau.eu/s/r1Ys_oWoP) of the cameras and work on pytapo library
-- [Alex X](https://github.com/AlexxIT) for his incredible work on go2rtc library, and its code for Tapo stream communication which was rewritten to python in order to implement stream-related features of this library
+MIT License - See LICENSE file for details
 
-# FAQ
+## Acknowledgments
 
-See https://github.com/JurajNyiri/HomeAssistant-Tapo-Control?tab=readme-ov-file#troubleshooting--faq
+- Originally forked from [pytapo](https://github.com/JurajNyiri/pytapo) Python library
+- Complete rewrite to pure Rust focusing on clean, efficient implementation
+- Thanks to the original pytapo contributors for reverse engineering the Tapo protocol
 
-# Disclaimer
+## Support
 
-Pytapo is an unofficial module for achieving interoperability with Tapo cameras.
+For issues and questions:
+- Check the [examples/](examples/) directory
+- Review the inline documentation: `cargo doc --open`
+- Open an issue on GitHub
 
-Author is in no way affiliated with Tp-Link or Tapo.
+## Roadmap
 
-All the api requests used within the library are available and published on the internet (examples linked above) and this module is purely just a wrapper around those https requests.
+- [x] Core authentication (traditional HTTPS)
+- [x] AES encryption/decryption
+- [x] Basic device info
+- [x] Child device listing
+- [ ] Full KLAP protocol implementation
+- [ ] Async API support
+- [ ] More device control methods
+- [ ] Media streaming (if requested)
 
-Author does not guarantee functionality of this library and is not responsible for any damage.
+---
 
-All product names, trademarks and registered trademarks in this repository, are property of their respective owners.
+**Note**: This library focuses on providing clean, efficient access to Tapo camera information. For advanced camera control (PTZ, privacy mode, recordings, etc.), consider extending the `execute_method()` function or using the original Python library.
