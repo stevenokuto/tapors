@@ -4,7 +4,7 @@ use crate::crypto::{
 use crate::error::{Result, TapoError};
 use crate::types::TapoResponse;
 use reqwest::blocking::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 #[derive(Debug, Clone)]
@@ -30,33 +30,6 @@ pub struct TraditionalAuth {
     seq: u32,             // Sequence number for requests
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct LoginRequest {
-    method: String,
-    params: LoginParams,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct LoginParams {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    username: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    password: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cnonce: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    encrypt_type: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct LoginResponse {
-    error_code: i32,
-    result: Option<LoginResult>,
-}
-
 #[derive(Debug, Deserialize, Default)]
 struct LoginResult {
     #[serde(default)]
@@ -67,24 +40,21 @@ struct LoginResult {
 
     #[serde(default)]
     device_confirm: String,
-
-    #[serde(default)]
-    user_group: String,
 }
 
 impl TraditionalAuth {
-    pub fn new(host: String, port: u16, username: String, password: String) -> Result<Self> {
+    pub fn new(host: &str, port: u16, username: &str, password: &str) -> Result<Self> {
         let client = Client::builder()
             .danger_accept_invalid_certs(true)
             .timeout(std::time::Duration::from_secs(10))
             .build()?;
 
         Ok(Self {
-            host,
+            host: host.to_string(),
             port,
             client,
-            username,
-            password,
+            username: username.to_string(),
+            password: password.to_string(),
             stok: None,
             cnonce: generate_nonce(),
             nonce: None,

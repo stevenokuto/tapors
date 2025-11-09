@@ -32,30 +32,24 @@ pub fn sha256_hash(data: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
-/// Encrypt data using AES-128-CBC
+/// Encrypt data using AES-128-CBC with PKCS7 padding
 pub fn aes_encrypt(data: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>> {
     let cipher = Aes128CbcEnc::new_from_slices(key, iv)
         .map_err(|e| TapoError::EncryptionError(format!("Failed to create cipher: {}", e)))?;
 
-    // Calculate padded length
-    let block_size = 16;
-    let padding_len = block_size - (data.len() % block_size);
-    let total_len = data.len() + padding_len;
+    // Allocate buffer with space for data + padding (up to one block extra)
+    let mut buffer = Vec::with_capacity(data.len() + 16);
+    buffer.extend_from_slice(data);
 
-    // Create buffer with space for padding
-    let mut buffer = vec![0u8; total_len];
-    buffer[..data.len()].copy_from_slice(data);
+    // Ensure buffer has enough space for worst-case padding
+    buffer.resize(data.len() + 16, 0);
 
-    // Apply PKCS7 padding manually
-    for i in data.len()..total_len {
-        buffer[i] = padding_len as u8;
-    }
-
-    // Encrypt in place
-    cipher.encrypt_padded_mut::<Pkcs7>(&mut buffer, data.len())
+    // encrypt_padded_mut handles PKCS7 padding internally
+    // Pass the original message length, it will pad and encrypt
+    let ciphertext = cipher.encrypt_padded_mut::<Pkcs7>(&mut buffer, data.len())
         .map_err(|e| TapoError::EncryptionError(format!("Encryption failed: {}", e)))?;
 
-    Ok(buffer)
+    Ok(ciphertext.to_vec())
 }
 
 /// Decrypt data using AES-128-CBC
@@ -82,25 +76,6 @@ pub fn base64_decode(data: &str) -> Result<Vec<u8>> {
     BASE64
         .decode(data)
         .map_err(|e| TapoError::EncryptionError(format!("Base64 decode failed: {}", e)))
-}
-
-/// Derive encryption key and IV from password and nonce
-pub fn derive_key_iv(password: &str, nonce: &str) -> (Vec<u8>, Vec<u8>) {
-    // MD5(password + nonce) for key derivation
-    let combined = format!("{}{}", password, nonce);
-    let hash = md5_hash(&combined);
-    let hash_bytes = hex::decode(&hash).unwrap_or_default();
-
-    // Key: first 16 bytes, IV: last 16 bytes (padded if needed)
-    let mut key = hash_bytes.clone();
-    key.resize(16, 0);
-
-    let mut iv = hash_bytes;
-    iv.resize(16, 0);
-    // Use second half for IV to provide more variation
-    iv.rotate_left(8);
-
-    (key, iv)
 }
 
 #[cfg(test)]

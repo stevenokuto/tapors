@@ -23,9 +23,6 @@ pub enum TapoError {
     #[error("Connection error: {0}")]
     ConnectionError(String),
 
-    #[error("KLAP protocol error: {0}")]
-    KlapError(String),
-
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 }

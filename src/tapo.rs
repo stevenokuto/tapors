@@ -1,4 +1,4 @@
-use crate::auth::{KlapAuth, TraditionalAuth};
+use crate::auth::TraditionalAuth;
 use crate::error::{Result, TapoError};
 use crate::types::{
     BasicInfo, ChildDevice, ChildDeviceListResult, DeviceInfoResult,
@@ -10,12 +10,7 @@ use serde_json::{json, Value};
 pub struct Tapo {
     host: String,
     port: u16,
-    auth: AuthMethod,
-}
-
-enum AuthMethod {
-    Traditional(TraditionalAuth),
-    Klap(KlapAuth),
+    auth: TraditionalAuth,
 }
 
 impl Tapo {
@@ -44,23 +39,8 @@ impl Tapo {
     /// * `username` - Username for authentication (typically "admin")
     /// * `password` - Device password
     pub fn new_with_port(host: &str, port: u16, username: &str, password: &str) -> Result<Self> {
-        // Try to detect if device uses KLAP protocol
-        let klap_auth = KlapAuth::new(host.to_string(), port)?;
-
-        let auth = if klap_auth.is_klap_device() {
-            // KLAP is detected but not fully implemented
-            // Fall back to traditional auth
-            let mut trad_auth =
-                TraditionalAuth::new(host.to_string(), port, username.to_string(), password.to_string())?;
-            trad_auth.authenticate()?;
-            AuthMethod::Traditional(trad_auth)
-        } else {
-            // Use traditional HTTPS authentication
-            let mut trad_auth =
-                TraditionalAuth::new(host.to_string(), port, username.to_string(), password.to_string())?;
-            trad_auth.authenticate()?;
-            AuthMethod::Traditional(trad_auth)
-        };
+        let mut auth = TraditionalAuth::new(host, port, username, password)?;
+        auth.authenticate()?;
 
         Ok(Self {
             host: host.to_string(),
@@ -84,69 +64,62 @@ impl Tapo {
     /// println!("Firmware version: {}", info.fw_ver);
     /// ```
     pub fn get_basic_info(&mut self) -> Result<BasicInfo> {
-        match &mut self.auth {
-            AuthMethod::Traditional(auth) => {
-                auth.ensure_authenticated()?;
+        self.auth.ensure_authenticated()?;
 
-                // Use multipleRequest wrapper with getDeviceInfo method
-                let request = json!({
-                    "method": "multipleRequest",
-                    "params": {
-                        "requests": [
-                            {
-                                "method": "getDeviceInfo",
-                                "params": {
-                                    "device_info": {
-                                        "name": ["basic_info"]
-                                    }
-                                }
+        // Use multipleRequest wrapper with getDeviceInfo method
+        let request = json!({
+            "method": "multipleRequest",
+            "params": {
+                "requests": [
+                    {
+                        "method": "getDeviceInfo",
+                        "params": {
+                            "device_info": {
+                                "name": ["basic_info"]
                             }
-                        ]
+                        }
                     }
-                });
-
-                let response = auth.send_request(request)?;
-
-                // Parse the multipleRequest response
-                let multi_resp: MultipleRequestResponse = serde_json::from_value(response)
-                    .map_err(|e| TapoError::InvalidResponse(format!("Failed to parse response: {}", e)))?;
-
-                if multi_resp.error_code != 0 {
-                    return Err(TapoError::DeviceError {
-                        code: multi_resp.error_code,
-                        msg: "Request failed".to_string(),
-                    });
-                }
-
-                // Extract the first response
-                let method_resp = multi_resp
-                    .result
-                    .responses
-                    .first()
-                    .ok_or_else(|| TapoError::InvalidResponse("No responses returned".to_string()))?;
-
-                if method_resp.error_code != 0 {
-                    return Err(TapoError::DeviceError {
-                        code: method_resp.error_code,
-                        msg: format!("Method {} failed", method_resp.method),
-                    });
-                }
-
-                // Parse the device info
-                let result_value = method_resp
-                    .result
-                    .as_ref()
-                    .ok_or_else(|| TapoError::InvalidResponse("Missing result in response".to_string()))?;
-
-                let device_info: DeviceInfoResult = serde_json::from_value(result_value.clone())
-                    .map_err(|e| TapoError::InvalidResponse(format!("Failed to parse device info: {}", e)))?;
-
-                Ok(device_info.device_info.basic_info)
+                ]
             }
-            AuthMethod::Klap(_) => Err(TapoError::KlapError(
-                "KLAP protocol not fully supported in this version".to_string(),
-            )),
+        });
+
+        let response = self.auth.send_request(request)?;
+
+        // Parse the multipleRequest response
+        let multi_resp: MultipleRequestResponse = serde_json::from_value(response)
+            .map_err(|e| TapoError::InvalidResponse(format!("Failed to parse response: {}", e)))?;
+
+        if multi_resp.error_code != 0 {
+            return Err(TapoError::DeviceError {
+                code: multi_resp.error_code,
+                msg: "Request failed".to_string(),
+            });
         }
+
+        // Extract the first response
+        let method_resp = multi_resp
+            .result
+            .responses
+            .first()
+            .ok_or_else(|| TapoError::InvalidResponse("No responses returned".to_string()))?;
+
+        if method_resp.error_code != 0 {
+            return Err(TapoError::DeviceError {
+                code: method_resp.error_code,
+                msg: format!("Method {} failed", method_resp.method),
+            });
+        }
+
+        // Parse the device info
+        let result_value = method_resp
+            .result
+            .as_ref()
+            .ok_or_else(|| TapoError::InvalidResponse("Missing result in response".to_string()))?;
+
+        let device_info: DeviceInfoResult = serde_json::from_value(result_value.clone())
+            .map_err(|e| TapoError::InvalidResponse(format!("Failed to parse device info: {}", e)))?;
+
+        Ok(device_info.device_info.basic_info)
     }
 
     /// Get list of child devices
@@ -165,42 +138,35 @@ impl Tapo {
     /// }
     /// ```
     pub fn get_child_devices(&mut self) -> Result<Vec<ChildDevice>> {
-        match &mut self.auth {
-            AuthMethod::Traditional(auth) => {
-                auth.ensure_authenticated()?;
+        self.auth.ensure_authenticated()?;
 
-                let request = json!({
-                    "method": "getChildDeviceList",
-                    "params": {
-                        "childControl": {
-                            "start_index": 0
-                        }
-                    }
-                });
-
-                let response = auth.send_request(request)?;
-
-                // Parse response
-                let tapo_resp: TapoResponse<ChildDeviceListResult> = serde_json::from_value(response)
-                    .map_err(|e| TapoError::InvalidResponse(format!("Failed to parse response: {}", e)))?;
-
-                if tapo_resp.error_code != 0 {
-                    return Err(TapoError::DeviceError {
-                        code: tapo_resp.error_code,
-                        msg: tapo_resp.msg.unwrap_or_else(|| "Unknown error".to_string()),
-                    });
+        let request = json!({
+            "method": "getChildDeviceList",
+            "params": {
+                "childControl": {
+                    "start_index": 0
                 }
-
-                let result = tapo_resp
-                    .result
-                    .ok_or_else(|| TapoError::InvalidResponse("Missing result in response".to_string()))?;
-
-                Ok(result.child_device_list)
             }
-            AuthMethod::Klap(_) => Err(TapoError::KlapError(
-                "KLAP protocol not fully supported in this version".to_string(),
-            )),
+        });
+
+        let response = self.auth.send_request(request)?;
+
+        // Parse response
+        let tapo_resp: TapoResponse<ChildDeviceListResult> = serde_json::from_value(response)
+            .map_err(|e| TapoError::InvalidResponse(format!("Failed to parse response: {}", e)))?;
+
+        if tapo_resp.error_code != 0 {
+            return Err(TapoError::DeviceError {
+                code: tapo_resp.error_code,
+                msg: tapo_resp.msg.unwrap_or_else(|| "Unknown error".to_string()),
+            });
         }
+
+        let result = tapo_resp
+            .result
+            .ok_or_else(|| TapoError::InvalidResponse("Missing result in response".to_string()))?;
+
+        Ok(result.child_device_list)
     }
 
     /// Execute a custom method on the device
@@ -212,27 +178,20 @@ impl Tapo {
     /// * `method` - The method name to execute
     /// * `params` - Optional parameters for the method
     pub fn execute_method(&mut self, method: &str, params: Option<Value>) -> Result<Value> {
-        match &mut self.auth {
-            AuthMethod::Traditional(auth) => {
-                auth.ensure_authenticated()?;
+        self.auth.ensure_authenticated()?;
 
-                let request = if let Some(p) = params {
-                    json!({
-                        "method": method,
-                        "params": p
-                    })
-                } else {
-                    json!({
-                        "method": method
-                    })
-                };
+        let request = if let Some(p) = params {
+            json!({
+                "method": method,
+                "params": p
+            })
+        } else {
+            json!({
+                "method": method
+            })
+        };
 
-                auth.send_request(request)
-            }
-            AuthMethod::Klap(_) => Err(TapoError::KlapError(
-                "KLAP protocol not fully supported in this version".to_string(),
-            )),
-        }
+        self.auth.send_request(request)
     }
 
     /// Get the device host
